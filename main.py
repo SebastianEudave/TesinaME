@@ -72,7 +72,7 @@ class MicroExpressionRecognition3D(nn.Module):
         #nn.Conv3d(64,64,kernel_size=(3,3,3),padding=(1,1,1))
         self.fc = nn.Sequential(
             nn.Dropout(dropout_rate),
-            nn.Linear(self.frames * 7 * 7 * 32, 4),
+            nn.Linear(self.frames * 7 * 7 * 32, 3),
             nn.Softmax(dim=1)
         )
 
@@ -110,7 +110,7 @@ class MEDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.phase = phase
-        self.emotions = {'positive': 0, 'negative': 1, 'surprise': 2, 'others': 3}
+        self.emotions = {'happiness': 0, 'disgust': 1, 'surprise': 2}
         self.dataset = {'inputs': [], 'targets': []}
 
         try:
@@ -133,21 +133,21 @@ class MEDataset(Dataset):
                 sample = torch.unsqueeze(sample.permute(3, 0, 1, 2), 0).float().cuda()
 
                 sample = F.interpolate(sample, (frames, input_size, input_size), mode='trilinear', align_corners=False).squeeze()
-                self.dataset['inputs'].append((sample).type(torch.ByteTensor))
+                self.dataset['inputs'].append((sample / 255.).float().cpu())
                 self.dataset['targets'].append(torch.tensor(self.emotions[row['emotion']]).long())
                 if phase == 'train':
                     transform = transforms.Compose([FlipLR()])
                     sample2 = transform(sample)
-                    self.dataset['inputs'].append((sample2).type(torch.ByteTensor))
+                    self.dataset['inputs'].append((sample2 / 255.).float().cpu())
                     self.dataset['targets'].append(torch.tensor(self.emotions[row['emotion']]).long())
+
             with open(path, 'wb') as f:
                 pickle.dump(self.dataset, f)
 
         counts = self.micro_expressions['emotion'].value_counts()
-        counts = counts['positive'] * [0] + counts['negative'] * [1] + counts['surprise'] * [2] + counts['others'] * [3]
+        counts = counts['happiness'] * [0] + counts['disgust'] * [1] + counts['surprise'] * [2]
         self.weights = compute_class_weight(class_weight='balanced', classes=np.unique(counts), y=counts)
         self.weights = self.weights / self.weights.sum()
-        print(self.weights)
 
     def __len__(self):
         return len(self.dataset['targets'])
@@ -165,6 +165,7 @@ class MEDataset(Dataset):
             sample = self.transform(sample)
 
         return sample
+
 
 class ToTensor(object):
     def __call__(self, sample):
@@ -239,19 +240,6 @@ class FlipLR(object):
         sample = image
         return sample
 
-class FlipLR_random(object):
-    def __call__(self, sample, p = 0.5):
-        if p < random.random():
-            image = sample['images']
-            image = torch.flip(image, [3])
-            sample['images'] = image
-        return sample
-
-class ToFloat(object):
-    def __call__(self, sample):
-        images, emotion = sample['images'], sample['emotion']
-        images, emotion = (images / 255).float(), emotion.long()
-        return {'images': images, 'emotion': emotion}
 
 class MakeGray(object):
     def __init__(self, p=0.5):
@@ -433,26 +421,19 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, file_na
 if __name__ == '__main__':
     data_dir = os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2')
     learning_rate = 1e-4
-    weight_decay = 1e-2
-    dropout_rate = 0.1
-    num_classes = 4
+    weight_decay = 1e-4
+    dropout_rate = 0.25
+    num_classes = 3
     batch_size = 8
-    num_epochs = 150
+    num_epochs = 50
     input_size = 224
     num_workers = 10
     frames = 32
-    cross_val = 19
-    file_name = "G:\\tesina\\Licencias\\Results\\" + "STCNN" + str(cross_val) + "_LR" + str(learning_rate) + "_WD" + str(weight_decay) + "_DR" + str(dropout_rate) + "_BS" + str(batch_size) + "_F" + str(frames) + ".csv"
+    file_name = "G:\\tesina\\Licencias\\Results\\" + "STCNN_LR" + str(learning_rate) + "_WD" + str(weight_decay) + "_DR" + str(dropout_rate) + "_BS" + str(batch_size) + "_F" + str(frames) + ".csv"
 
     train_transforms = transforms.Compose([
-        ToFloat(),
         transforms.RandomChoice([MakeGray(), MakeJitter()], p=[0.5, 0.5]),
         Crop(),
-        MeanNormalize()
-    ])
-
-    val_transforms = transforms.Compose([
-        ToFloat(),
         MeanNormalize()
     ])
 
@@ -460,9 +441,9 @@ if __name__ == '__main__':
     image_datasets = {
         'train': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=train_transforms,
                            csv_file='train_data.csv', phase='train', path='train.pkl', input_size=input_size, frames = frames),
-        'val': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=val_transforms,
+        'val': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=None,
                          csv_file='val_data.csv', phase='val', path='val.pkl', input_size=input_size, frames = frames),
-        'test': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=val_transforms,
+        'test': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=None,
                          csv_file='test_data.csv', phase='test', path='test.pkl', input_size=input_size, frames=frames)
     }
 
