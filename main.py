@@ -131,15 +131,10 @@ class MEDataset(Dataset):
                 # Transforming using CUDA to speed up, return to CPU to save memory,
                 # pending to check memory transfer overhead.
                 sample = torch.unsqueeze(sample.permute(3, 0, 1, 2), 0).float().cuda()
-
+                print(sample.size())
                 sample = F.interpolate(sample, (frames, input_size, input_size), mode='trilinear', align_corners=False).squeeze()
                 self.dataset['inputs'].append((sample / 255.).float().cpu())
                 self.dataset['targets'].append(torch.tensor(self.emotions[row['emotion']]).long())
-                if phase == 'train':
-                    transform = transforms.Compose([FlipLR()])
-                    sample2 = transform(sample)
-                    self.dataset['inputs'].append((sample2 / 255.).float().cpu())
-                    self.dataset['targets'].append(torch.tensor(self.emotions[row['emotion']]).long())
 
             with open(path, 'wb') as f:
                 pickle.dump(self.dataset, f)
@@ -188,7 +183,6 @@ class MeanNormalize(object):
     def __call__(self, sample):
         images, emotion = sample['images'], sample['emotion']
         images = images.permute(1,0,2,3)
-        # mean, std = [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
         for i in range(len(images)):
             mean, std = images[0].mean([1, 2]), images[0].std([1, 2])
             images[i][0] = images[i][0].sub_(mean[0]).div_(std[0])
@@ -234,10 +228,14 @@ class Crop(object):
         return sample
 
 class FlipLR(object):
+    def __init__(self, p=0.5):
+        self.p = p
+
     def __call__(self, sample):
-        image = sample
-        image = torch.flip(image, [3])
-        sample = image
+        if random.random() < self.p:
+            image = sample['images']
+            image = torch.flip(image, [3])
+            sample['images'] = image
         return sample
 
 
@@ -374,64 +372,27 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, file_na
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
 
-    model.eval()
-    test_targets, test_preds = [], []
-    running_loss, running_corrects = 0.0, 0
-    for inputs in dataloaders['test']:
-
-        inputs['images'] = inputs['images'].to(device)
-        inputs['emotion'] = inputs['emotion'].to(device)
-        optimizer.zero_grad()
-
-        with torch.set_grad_enabled('test' == 'train'):
-            outputs = model(inputs['images'])
-            loss = criterion(outputs, inputs['emotion'])
-            _, preds = torch.max(outputs, 1)
-            targets_list = inputs['emotion'].cpu().tolist()
-            preds_list = preds.cpu().tolist()
-            test_targets.extend(targets_list)
-            test_preds.extend(preds_list)
-
-        running_loss += loss.item() * inputs['images'].size(0)
-        running_corrects += torch.sum(preds == inputs['emotion'])
-
-    test_loss = running_loss / len(dataloaders['test'].dataset)
-    test_acc = running_corrects.double() / len(dataloaders['test'].dataset)
-    print('Test Loss: {:.4e} Acc: {:.4f}'.format(test_loss, test_acc))
-    test_loss = '{:.4f}'.format(test_loss)
-    test_acc = '{:.4f}'.format(test_acc)
-    conf_matrix = confusion_matrix(test_targets, test_preds)
-    f1 = f1_score(y_true=test_targets, y_pred=test_preds, average='weighted')
-    test_f1 = '{:.4f}'.format(f1)
-    myFile.close()
-    print(conf_matrix, f1)
-    with open(file_name, 'a', newline='') as f:
-        writer1 = csv.writer(f)
-        writer1.writerow([""])
-        writer1.writerow(["Test Loss", test_loss, ""])
-        writer1.writerow(["Test Acc", test_acc, ""])
-        writer1.writerow(["Test F1", test_f1, ""])
-        writer1.writerows(conf_matrix)
-
     # load best model weights
     model.load_state_dict(best_model_wts)
+    myFile.close()
     return model, val_acc_history
 
 
 if __name__ == '__main__':
     data_dir = os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2')
     learning_rate = 1e-4
-    weight_decay = 1e-4
+    weight_decay = 1e-2
     dropout_rate = 0.25
     num_classes = 3
-    batch_size = 8
+    batch_size = 4
     num_epochs = 50
     input_size = 224
     num_workers = 10
-    frames = 32
+    frames = 22
     file_name = "G:\\tesina\\Licencias\\Results\\" + "STCNN_LR" + str(learning_rate) + "_WD" + str(weight_decay) + "_DR" + str(dropout_rate) + "_BS" + str(batch_size) + "_F" + str(frames) + ".csv"
 
     train_transforms = transforms.Compose([
+        FlipLR(),
         transforms.RandomChoice([MakeGray(), MakeJitter()], p=[0.5, 0.5]),
         Crop(),
         MeanNormalize()
@@ -442,15 +403,12 @@ if __name__ == '__main__':
         'train': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=train_transforms,
                            csv_file='train_data.csv', phase='train', path='train.pkl', input_size=input_size, frames = frames),
         'val': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=None,
-                         csv_file='val_data.csv', phase='val', path='val.pkl', input_size=input_size, frames = frames),
-        'test': MEDataset(root_dir=os.path.join('G:\\tesina\\Licencias', 'MicroExpressions_Data2'), transform=None,
-                         csv_file='test_data.csv', phase='test', path='test.pkl', input_size=input_size, frames=frames)
+                         csv_file='val_data.csv', phase='val', path='val.pkl', input_size=input_size, frames = frames)
     }
 
     data_loaders = {
         'train': DataLoader(image_datasets['train'], batch_size=batch_size, shuffle=True, num_workers=num_workers),
         'val': DataLoader(image_datasets['val'], batch_size=batch_size, shuffle=False, num_workers=num_workers),
-        'test': DataLoader(image_datasets['test'], batch_size=batch_size, shuffle=False, num_workers=num_workers),
     }
 
     torch.cuda.empty_cache()

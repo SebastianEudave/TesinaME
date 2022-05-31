@@ -19,22 +19,15 @@ print(df)
 print(df['Estimated Emotion'].unique())
 labels = ('Emotion', 'Subject', 'ME_Number')
 
-myFile, myFile2, myFile3 = open('train_data.csv', 'w'), open('val_data.csv', 'w'), open('test_data.csv', 'w')
+myFile, myFile2 = open('train_data.csv', 'w'), open('val_data.csv', 'w')
 writer = csv.DictWriter(myFile, fieldnames=labels, lineterminator='\n')
 writer2 = csv.DictWriter(myFile2, fieldnames=labels, lineterminator='\n')
-writer3 = csv.DictWriter(myFile3, fieldnames=labels, lineterminator='\n')
 
 allEmotions = ['happiness', 'disgust', 'surprise']
 emotionAddedCount = {'happiness': 0, 'disgust': 0, 'surprise': 0}
-emotionAddedCount2 = {'happiness': 0, 'disgust': 0, 'surprise': 0}
 
 counts = df['Estimated Emotion'].value_counts()
 emotionCount = {
-    'happiness': counts['happiness'],
-    'disgust': counts['disgust'],
-    'surprise': counts['surprise']
-}
-emotionCount2 = {
     'happiness': counts['happiness'],
     'disgust': counts['disgust'],
     'surprise': counts['surprise']
@@ -46,11 +39,6 @@ plot_bars(allEmotions, emotionCount.values())
 for name in allEmotions:
     emotionCount[name] = round(emotionCount[name] * 0.8)
 
-for name in allEmotions:
-    emotionCount2[name] = round((emotionCount2[name] - emotionCount[name]) * 0.5)
-
-df = df.sample(frac=1)
-
 for _, row in df.iterrows():
     emo = row['Estimated Emotion']
     if emo in allEmotions:
@@ -60,19 +48,11 @@ for _, row in df.iterrows():
                                                    str(row['Filename'])]))
             writer.writerow({'Emotion': emo, 'Subject': str(row['Subject']), 'ME_Number': str(row['Filename'])})
             emotionAddedCount[emo] += 1
-        elif emotionAddedCount2[emo] < emotionCount2[emo]:
+        else:
             shutil.copytree(os.path.join(*imUrl + ['Cropped', str(row['Subject']), str(row['Filename'])]),
                             os.path.join( *imUrl + ['MicroExpressions_Data2', 'val', emo, str(row['Subject']),
                                                     str(row['Filename'])]))
             writer2.writerow({'Emotion': emo, 'Subject': str(row['Subject']), 'ME_Number': str(row['Filename'])})
-            emotionAddedCount2[emo] += 1
-        else:
-            shutil.copytree(os.path.join(*imUrl + ['Cropped', str(row['Subject']), str(row['Filename'])]),
-                            os.path.join(*imUrl + ['MicroExpressions_Data2', 'test', emo, str(row['Subject']),
-                                                   str(row['Filename'])]))
-            writer3.writerow({'Emotion': emo, 'Subject': str(row['Subject']), 'ME_Number': str(row['Filename'])})
-            emotionAddedCount2[emo] += 1
-
 
 plot_bars(allEmotions, emotionCount.values())
 print(emotionCount)
